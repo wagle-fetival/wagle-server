@@ -1,13 +1,13 @@
-package com.wagle.wagleserver;
+package com.wagle.backend;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class WagleServerApplication {
+public class BackendApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(WagleServerApplication.class, args);
+		SpringApplication.run(BackendApplication.class, args);
 	}
 
 }
