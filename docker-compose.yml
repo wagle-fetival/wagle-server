@@ -16,9 +16,7 @@ services:
     restart: always
 
   app:
-    build:
-      context: .
-      network: host
+    build: .
     image: ${APP_IMAGE:-wagle-app}
     container_name: wagle-app
     ports:
