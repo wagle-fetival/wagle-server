@@ -1,10 +1,10 @@
-package com.wagle.wagleserver;
+package com.wagle.backend;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class WagleServerApplicationTests {
+class BackendApplicationTests {
 
 	@Test
 	void contextLoads() {
