@@ -16,7 +16,9 @@ services:
     restart: always
 
   app:
-    build: .
+    build:
+      context: .
+      network: host
     image: ${APP_IMAGE:-wagle-app}
     container_name: wagle-app
     ports:
@@ -34,3 +36,8 @@ services:
 
 volumes:
   mysql_data:
+
+networks:
+  default:
+    driver_opts:
+      com.docker.network.driver.mtu: 1400
