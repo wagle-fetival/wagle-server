@@ -1,0 +1,135 @@
+name: CD
+
+on:
+  push:
+    branches: [develop]
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-school-server
+  cancel-in-progress: false
+
+jobs:
+  build-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Build check
+        run: |
+          chmod +x gradlew
+          ./gradlew bootJar -x test
+
+  deploy:
+    needs: build-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check secrets
+        env:
+          H: ${{ secrets.SSH_HOST }}
+          P: ${{ secrets.SSH_PORT }}
+          U: ${{ secrets.SSH_USER }}
+          W: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          for v in H P U W; do
+            if [ -z "${!v}" ]; then
+              echo "::error::SSH secret이 비어 있습니다 ($v)"
+              exit 1
+            fi
+          done
+
+      - name: Deploy to school server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          timeout: 60s
+          command_timeout: 25m
+          script: |
+            set -euo pipefail
+
+            APP_DIR=~/wagle-server
+            REPO=https://github.com/wagle-fetival/wagle-server.git
+            BRANCH=develop
+            IMAGE=wagle-app
+
+            echo "== sudo 확인 =="
+            if ! sudo -n true 2>/dev/null; then
+              echo "sudo가 비밀번호를 요구합니다. 배포 중단"
+              exit 1
+            fi
+
+            echo "== 코드 받기 =="
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone -b "$BRANCH" "$REPO" "$APP_DIR"
+            fi
+            cd "$APP_DIR"
+            git fetch origin "$BRANCH"
+            git checkout -f "$BRANCH"
+            git reset --hard "origin/$BRANCH"
+            echo "배포 커밋: $(git log -1 --oneline)"
+
+            echo "== .env 확인 =="
+            if [ ! -f .env ]; then
+              echo ".env 파일이 없습니다. 배포 중단"
+              exit 1
+            fi
+            sed -i 's/\r$//' .env
+
+            echo "== 디스크 확인 =="
+            df -h /
+
+            echo "== 이전 이미지 백업 =="
+            HAS_PREV=false
+            if sudo docker image inspect "$IMAGE:latest" >/dev/null 2>&1; then
+              sudo docker tag "$IMAGE:latest" "$IMAGE:previous"
+              HAS_PREV=true
+            fi
+
+            echo "== 빌드 =="
+            sudo docker compose build app
+
+            echo "== 실행 =="
+            sudo docker compose up -d
+
+            echo "== 헬스체크 =="
+            OK=false
+            for i in $(seq 1 30); do
+              CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:80/ || true)
+              if [ "$CODE" != "000" ] && [ "$CODE" -lt 500 ]; then
+                OK=true
+                echo "앱 응답 확인 (HTTP $CODE)"
+                break
+              fi
+              echo "대기 중... ($i/30)"
+              sleep 5
+            done
+
+            if [ "$OK" != "true" ]; then
+              echo "== 앱 실행 실패, 로그 =="
+              sudo docker logs wagle-app --tail 100 || true
+              if [ "$HAS_PREV" = "true" ]; then
+                echo "== 이전 버전으로 롤백 =="
+                sudo docker tag "$IMAGE:previous" "$IMAGE:latest"
+                sudo docker compose up -d --no-build app
+              fi
+              exit 1
+            fi
+
+            echo "== 정리 =="
+            sudo docker image prune -f
+            sudo docker builder prune -f --filter until=168h
+
+            sudo docker ps
